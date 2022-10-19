@@ -1,0 +1,41 @@
+version: '3.8'
+services:
+#elastcisearch service 정의
+  elasticsearch-test1:
+    #사용되는 elasticsearch image   
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
+
+    container_name: elasticsearch-master
+    environment:  
+    # 해당 노드가 외부에서 접근하거나 api기능을 사용하기위한 port 설정 
+    - http.port=9360
+    # tls 통신을 위한 transport 설정
+    - transport.port=9310
+    # elasticsearch JAVA_HEAP_MEM 설정
+    - "ES_JAVA_OPTS=-Xmx2gg -Xms2g"
+    # cluster 이름 설정
+    - cluster.name=elastic-stack
+    # node 이름 설정
+    - node.name=elastic-master
+    # master 노드 후보 설정
+    - cluster.initial_master_nodes=elastic-master
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1		
+    volumes: 
+      # 추가적인 플러그인 설치를 위한 volume 마운트
+      - data_plugin1:/usr/share/elasticsearch/plugins #docker voluem 위치로 마운트      
+      - type: bind
+      # 세그먼트,로그 저장을 host pc에 저장하기위한 volume 바인딩
+        source: ./volume/data #호스트 파일시스템 path 값
+        target: /usr/share/elasticsearch/data #conatiner 내부 path 값       
+      - type: bind
+        source: ./volume/logs #호스트 파일시스템 path 값
+        target: /usr/share/elasticsearch/logs #conatiner 내부 path 값   
+    network_mode: "host" # host pc의 네트워크 정보를 받아 올 수 있도록 설정  
+  
+#Host volume의 실제 위치 local 일경우 
+volumes:     
+  data_plugin1:
+    driver: local
