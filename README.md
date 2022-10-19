@@ -29,7 +29,7 @@
     ./bin/elasticsearch-setup-passwords interactive
     ```
     
-    ![Sep-19-2022 10-27-58.gif](elasticsearch(container%E1%84%92%E1%85%AA%E1%86%AB%E1%84%80%E1%85%A7%E1%86%BC)%20scale%E1%84%8B%E1%85%B3%E1%86%AF%20%E1%84%8B%E1%85%B1%E1%84%92%E1%85%A1%E1%86%AB%20%E1%84%80%E1%85%AE%E1%84%89%E1%85%A5%2092653f1bc1974778ba0ad9f4b8ed1d1d/Sep-19-2022_10-27-58.gif)
+  ![image](https://user-images.githubusercontent.com/65060314/196607110-4bcfecb5-0104-4265-9864-0b39f41efd52.png)
     
     3) elasticsearch enrollment-token 발급 
     
