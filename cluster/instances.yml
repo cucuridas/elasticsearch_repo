@@ -1,0 +1,49 @@
+instances:
+  - name: esmaster01
+    dns:
+      - esmaster01
+      - localhost
+    ip:
+      - 127.0.0.1      
+
+  - name: esmaster02
+    dns:
+      - esmaster02
+      - localhost
+    ip:
+      - 127.0.0.1
+
+  - name: esdata01
+    dns:
+      - esdata01
+      - localhost
+    ip:
+      - 127.0.0.1
+
+  - name: esdata02
+    dns:
+      - esdata02  
+      - localhost
+    ip:
+      - 127.0.0.1
+
+  - name: esdata03
+    dns:
+      - esdata03
+      - localhost
+    ip:
+      - 127.0.0.1
+
+  - name: kib01
+    dns:
+      - kib01
+      - localhost
+    ip:
+      - 127.0.0.1
+
+  - name: log001
+    dns:
+      - log001
+      - localhost
+    ip:
+      - 127.0.0.1      

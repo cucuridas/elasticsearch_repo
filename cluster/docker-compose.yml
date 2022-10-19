@@ -1,0 +1,393 @@
+version: '3.8'
+services:
+  make-directory:
+    container_name: make-datapath-directory
+    image: ubuntu:latest
+    volumes:
+      - type: bind
+        source: ./
+        target: /usr/share/
+
+    command: sh -c "mkdir -p /usr/share/data_node1 /usr/share/volume/data_node2 /usr/share/volume/data_node3 /usr/share/data_node1/data /usr/share/data_node1/logs /usr/share/data_node2/data /usr/share/data_node2/logs /usr/share/data_node3/data /usr/share/data_node3/logs"
+
+#인증서 생성 service 실행 - 해당노드는 생성 후 command 작업이 끝나면 down 상태로 변경 됨
+  create_certs:
+    #elastic module을 활용하여 인증서 생성이 진행됨에 따라 elasticsearch 이미지를 사용
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.15.2
+    #인증서 생성 모듈을 실행하는 bash command line
+    command: >
+      bash -c '
+        yum install -y -q -e 0 unzip;
+        if [[ ! -f /certs/bundle.zip ]]; then
+          bin/elasticsearch-certutil cert --silent --pem --in config/certificates/instances.yml -out /certs/bundle.zip;
+          unzip /certs/bundle.zip -d /certs;
+        fi;
+        chown -R 1000:0 /certs
+      '
+    #작업이 진행되는 container 내부의 디렉토리 주소  
+    working_dir: /usr/share/elasticsearch
+    #volume mount를 통해 생성된 인증서를 docker volume에 저장하고 다른 node들이 사용
+    volumes:
+      - certs:/certs
+      - .:/usr/share/elasticsearch/config/certificates
+    #브릿지 네트워크를 통한 cluster 내부통신 진행      
+    networks:
+      - eknetwork
+    depends_on:
+      - make-directory
+# elasticsearch master node container 생성  
+  esmaster01:
+    #사용되는 elasticsearch image 
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
+    #container
+    container_name: esmaster01
+    environment:
+      - http.port=9350 #elasticsearch Node 사용할 포트번호
+      - node.name=esmaster01 #elasticsearch Node 이름
+      - node.roles=master,ingest #elasticsearch Node role 정책 (master,data,ml,등)
+      - path.repo="/usr/share/elasticsearch/data" #클러스터 백업 시 생성하게 되는 스냅샷 repository의 path 값
+      - cluster.name=es_integration_log #클러스터 이름
+      - discovery.seed_hosts=esmaster02,esdata01,esdata02,esdata03 #cluster를 구성할 node를 node 이름으로 찾는 설정
+      - cluster.initial_master_nodes=esmaster01,esmaster02 # 최초 cluster 구성시에 마스터 노드로 선정될 노드 후보를 명시
+      - bootstrap.memory_lock=true #swap memory 사용에 대해 제한 설정
+      - xpack.security.enabled=true #xpack을 통한 보안설정 여부 
+      - xpack.license.self_generated.type=trial #xpack license의 종류 설정          
+      - xpack.security.http.ssl.enabled=true # ssl을 통해 외부에서 노드 접속시 https 통신으로 암호화 설정 여부
+      - xpack.security.http.ssl.key=$CERTS_DIR/esmaster01/esmaster01.key #https 통신 시 사용하게 될 Key의 path 값
+      - xpack.security.http.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt #https 통신 시 사용하게 될 ca인증서 파일의 Path 값
+      - xpack.security.http.ssl.certificate=$CERTS_DIR/esmaster01/esmaster01.crt #https 통신 사 사용하게 될 crt 인증서 파일 path 값
+      - xpack.security.transport.ssl.enabled=true #TLS 통신 설정 여부 
+      - xpack.security.transport.ssl.verification_mode=certificate #TLS 통신 시 설정 옵션 (certificate, none 등)
+      - xpack.security.transport.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt #TLS 통신 시 사용하게 될 CA 인증서 파일의 path 값
+      - xpack.security.transport.ssl.certificate=$CERTS_DIR/esmaster01/esmaster01.crt #TLS 통신 시 사용하게 될 crt 인증서 파일 path 값
+      - xpack.security.transport.ssl.key=$CERTS_DIR/esmaster01/esmaster01.key ##TLS 통신 시 사용하게 될 key 인증서 파일 path 값
+      - "ES_JAVA_OPTS=-Xmx1g -Xms1g" #Java heap memory 최소 치 최대 치 설정
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    #container port 설정     
+    ports:
+      - 9350:9350
+    #volume path 설정  
+    # - master node의 경우 config 파일외에 설정하게되는 부분이 없음으로 아래와 같이 volume mount 진행  
+    # - "$CERTS_DIR" 값은 env 에서 확인가능   'CERTS_DIR=/usr/share/elasticsearch/config/certificates'
+    volumes: 
+      - masterConfig01:/usr/share/elasticsearch/config
+      - certs:$CERTS_DIR     
+    #container 내부 통신을 위한 브릿지 네트워크 생성   
+    networks:
+      - eknetwork
+    #정상적으로 인증서 생성 후 설정이 완료 되었는지 확인하는 구간
+    #"esmaster02" 노드는 해당 내용 skip
+    healthcheck:
+      test: curl --cacert $CERTS_DIR/ca/ca.crt -s https://localhost:9350 >/dev/null; if [[ $$? == 52 ]]; then echo 0; else echo 1; fi
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    # 'create_certs' service 작업이 완료 후 해당 container 생성  
+    depends_on:
+      - create_certs      
+
+# 'esmaster01' 주석 참고
+  esmaster02:
+    #사용되는 elasticsearch image   
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
+
+    container_name: esmaster02
+    environment:
+      - http.port=9360
+      - node.name=esmaster02
+      - node.roles=master,ingest
+      - path.repo="/usr/share/elasticsearch/data"      
+      - cluster.name=es_integration_log
+      - discovery.seed_hosts=esmaster01,esdata01,esdata02,esdata03
+      - cluster.initial_master_nodes=esmaster01,esmaster02
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.license.self_generated.type=trial         
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=$CERTS_DIR/esmaster02/esmaster02.key
+      - xpack.security.http.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt
+      - xpack.security.http.ssl.certificate=$CERTS_DIR/esmaster02/esmaster02.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt
+      - xpack.security.transport.ssl.certificate=$CERTS_DIR/esmaster02/esmaster02.crt
+      - xpack.security.transport.ssl.key=$CERTS_DIR/esmaster02/esmaster02.key      
+      - "ES_JAVA_OPTS=-Xmx1g -Xms1g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - 9360:9360
+    volumes: 
+      - masterConfig02:/usr/share/elasticsearch/config
+      - certs:$CERTS_DIR      
+    networks:
+      - eknetwork
+    depends_on:
+      - create_certs
+
+# elasticsearch data node container 생성
+# 'image','container_name','enviroment' 내용은  'esmaster01' 주석 참고
+  esdata01:  
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
+    container_name: esdata01
+    environment:
+      - http.port=9550
+      - node.name=esdata01
+      - path.repo="/usr/share/elasticsearch/data"      
+      - node.roles=data,master,voting_only,ingest
+      - cluster.name=es_integration_log
+      - discovery.seed_hosts=esmaster01,esmaster02,esdata02,esdata03
+      - cluster.initial_master_nodes=esmaster01,esmaster02
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.license.self_generated.type=trial                  
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=$CERTS_DIR/esdata01/esdata01.key
+      - xpack.security.http.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt
+      - xpack.security.http.ssl.certificate=$CERTS_DIR/esdata01/esdata01.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt
+      - xpack.security.transport.ssl.certificate=$CERTS_DIR/esdata01/esdata01.crt
+      - xpack.security.transport.ssl.key=$CERTS_DIR/esdata01/esdata01.key       
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g" #master node 보다 할당량이 많아야함
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    networks:
+      - eknetwork
+    volumes: 
+      - dataConfig01:/usr/share/elasticsearch/config #docker voluem 위치로 마운트
+      - dataPlugin01:/usr/share/elasticsearch/plugins #docker voluem 위치로 마운트
+      - certs:$CERTS_DIR      
+      - type: bind
+        source: ./data_node1/data #호스트 파일시스템 path 값
+        target: /usr/share/elasticsearch/data #conatiner 내부 path 값       
+      - type: bind
+        source: ./data_node1/logs #호스트 파일시스템 path 값
+        target: /usr/share/elasticsearch/logs #conatiner 내부 path 값        
+    ports:
+      - 9550:9550
+    depends_on:
+      - create_certs     
+
+# 'esdata01' 주석 참고
+  esdata02:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
+    container_name: esdata02
+    environment:  
+      - http.port=9560
+      - node.name=esdata02
+      - node.roles=data,ingest
+      - path.repo="/usr/share/elasticsearch/data"      
+      - cluster.name=es_integration_log
+      - discovery.seed_hosts=esmaster02,esmaster01,esdata01,esdata03
+      - cluster.initial_master_nodes=esmaster01,esmaster02
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.license.self_generated.type=trial               
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=$CERTS_DIR/esdata02/esdata02.key
+      - xpack.security.http.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt
+      - xpack.security.http.ssl.certificate=$CERTS_DIR/esdata02/esdata02.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt
+      - xpack.security.transport.ssl.certificate=$CERTS_DIR/esdata02/esdata02.crt
+      - xpack.security.transport.ssl.key=$CERTS_DIR/esdata02/esdata02.key             
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1       
+    networks:
+      - eknetwork
+    volumes: 
+      - dataConfig02:/usr/share/elasticsearch/config
+      - dataPlugin02:/usr/share/elasticsearch/plugins
+      - certs:$CERTS_DIR      
+      - type: bind
+        source: ./data_node2/data
+        target: /usr/share/elasticsearch/data      
+      - type: bind
+        source: ./data_node2/logs
+        target: /usr/share/elasticsearch/logs         
+    ports:
+      - 9560:9560
+    depends_on:
+      - create_certs  
+
+# 'esdata01' 주석 참고
+  esdata03:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
+    container_name: esdata03
+    environment:
+      - http.port=9570
+      - node.name=esdata03
+      - node.roles=data,ingest
+      - path.repo="/usr/share/elasticsearch/data"      
+      - cluster.name=es_integration_log
+      - discovery.seed_hosts=esmaster01,esmaster01,esdata02,esdata01
+      - cluster.initial_master_nodes=esmaster01,esmaster02
+      - bootstrap.memory_lock=true
+      - xpack.security.enabled=true
+      - xpack.license.self_generated.type=trial               
+      - xpack.security.http.ssl.enabled=true
+      - xpack.security.http.ssl.key=$CERTS_DIR/esdata03/esdata03.key
+      - xpack.security.http.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt
+      - xpack.security.http.ssl.certificate=$CERTS_DIR/esdata03/esdata03.crt
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.certificate_authorities=$CERTS_DIR/ca/ca.crt
+      - xpack.security.transport.ssl.certificate=$CERTS_DIR/esdata03/esdata03.crt
+      - xpack.security.transport.ssl.key=$CERTS_DIR/esdata03/esdata03.key        
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1    
+    networks:
+      - eknetwork
+    volumes: 
+      - dataConfig03:/usr/share/elasticsearch/config
+      - dataPlugin03:/usr/share/elasticsearch/plugins
+      - certs:$CERTS_DIR      
+      - type: bind
+        source: ./data_node3/data
+        target: /usr/share/elasticsearch/data      
+      - type: bind
+        source: ./data_node3/logs
+        target: /usr/share/elasticsearch/logs        
+    ports:
+      - 9570:9570
+    depends_on:
+      - create_certs     
+# kibana node container 생성        
+  kib01:
+    #kibana 에서 사용하게될 image (*version은 꼭 동일하게 진행)
+    image: docker.elastic.co/kibana/kibana:8.3.3
+    #conatiner 이름
+    container_name: kib01
+    #'esmaster01' container의 healthcheck가 완료 후 condition의 대한 정보가 'service_healthy' 알 때  해당 노드 생성
+    depends_on: {"esmaster01": {"condition": "service_healthy"}}
+    #container port 설정
+    ports:
+      - 5601:5601
+    #환경 변수 설정
+    environment:
+      #server 이름 설정
+      SERVERNAME: localhost
+      # 연결하고자 하는 elasticsearch master node url 주소 입력 (설정하지 않아도 연결에 문제는 없다고 나오나 확인필요)
+      ELASTICSEARCH_URL: https://esmaster01:9350
+      # 연결하고자 하는 elasticsearch master node 주소
+      ELASTICSEARCH_HOSTS: https://esmaster01:9350
+      # elasticsearch 로 접근할때 사용할 auth 계정 정보
+      ELASTICSEARCH_USERNAME: kibana_system
+      # 비밀번호의 경우 보안설정 프로세스에 따라 진행하여 해당 값을 채워주어야 함
+      ELASTICSEARCH_PASSWORD: timegate1!
+      # kibana에서 사용하게 될 ca 인증서 path 값
+      ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES: $CERTS_DIR/ca/ca.crt
+      # ssl 인증서를 통한 https 통신 설정 여부
+      SERVER_SSL_ENABLED: "true"
+      # https 통신 시 사용하게 될 key path 값
+      SERVER_SSL_KEY: $CERTS_DIR/kib01/kib01.key
+      # https 통신 시 사용하게 될 crt 파일 path 값
+      SERVER_SSL_CERTIFICATE: $CERTS_DIR/kib01/kib01.crt
+    # 볼륨 마운트 - "$CERTS_DIR" 값은 env 에서 확인가능   'CERTS_DIR=/usr/share/elasticsearch/config/certificates'
+    volumes:
+      - certs:$CERTS_DIR
+    #container 내부 통신을 위한 브릿지 네트워크 생성        
+    networks:
+      - eknetwork
+
+# logstash node container 생성  
+  logstash:
+    #kibana 에서 사용하게될 image (*version은 꼭 동일하게 진행)  
+    image: docker.elastic.co/logstash/logstash:8.3.3
+    #conatiner 이름    
+    container_name: log001
+    #container port 설정    
+    ports:
+      - "5100:5100" # 'beats'를 통해 데이터를 수집하기 위한 포트
+      - "9600:9600" # logstash continaer로 접속하기 위한 포트
+    #환경 변수 설정  
+    environment:
+      # #xpack을 통한 모니터링 설정 여부 - 보안설정을 위해 설정 필요
+      - xpack.monitoring.enabled=true
+      #elasticsearch와 보안통신을 하기 위한 auth 계정 정보
+      - xpack.monitoring.elasticsearch.username=logstash_system
+      #kibana system과 동일하게 password 정보는 프로세스 진행 후 따로 기입  
+      - xpack.monitoring.elasticsearch.password=timegate1!
+      #모니터링하게 되는 master Node의 주소  
+      - xpack.monitoring.elasticsearch.hosts=https://esmaster01:9350
+      #elasticsearch 와 ssl 통신을 하게 될 때 사용하는 crt 파일 path 값
+      - xpack.monitoring.elasticsearch.ssl.certificate.authority=$CERTS_DIR/ca/ca.crt
+      #logstash 의 java heap memroy 최솟값 최대값 설정           
+      - "LS_JAVA_OPTS=-Xms2g -Xmx2g"
+    #container 내부 통신을 위한 브릿지 네트워크 생성       
+    networks:
+      - eknetwork
+    # 볼륨 마운트 - "$CERTS_DIR" 값은 env 에서 확인가능   'CERTS_DIR=/usr/share/elasticsearch/config/certificates'      
+    volumes:
+      - logstash:/usr/share/logstash
+      - certs:$CERTS_DIR
+      - ./logstash/pipeline:/usr/share/logstash/pipeline
+    # 아래에 명시한 container가 생성 후 logstash 노드 생성  
+    depends_on:
+      - esmaster01
+      - esmaster02
+      - esdata01
+      - esdata02
+      - esdata03
+      - create_certs      
+
+#Host volume의 실제 위치 local 일경우 
+volumes:
+  #master node config에 대한 정보가 mount
+  masterConfig01:
+    driver: local
+  #master node config에 대한 정보가 mount    
+  masterConfig02:
+    driver: local
+  #data node config에 대한 정보가 mount    
+  dataConfig01:
+    driver: local
+  #data node config에 대한 정보가 mount       
+  dataConfig02:
+    driver: local
+  #data node config에 대한 정보가 mount       
+  dataConfig03:
+    driver: local
+  #data node plugin 대한 정보가 mount       
+  dataPlugin01:
+    driver: local
+  #data node plugin 대한 정보가 mount      
+  dataPlugin02:
+    driver: local
+  #data node plugin 대한 정보가 mount     
+  dataPlugin03:
+    driver: local
+  #kibana node의 '/usr/share/kibana' 대한 모든 정보가 mount      
+  kibana:
+    driver: local
+  #인증서 생성 후 생성된 인증서를 volume에 mount
+  certs:
+    driver: local
+  #logstash node의 '/usr/share/kibana' 대한 모든 정보가 mount       
+  logstash:
+    driver: local
+
+#container 내부통신으로 사용하기 위한 브릿지 네트워크 생성
+networks:
+  eknetwork:
+    #network이름
+    name: test-eknetwork 
+    #container 내부끼리의 통신을 지원여부에 대한 설정
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"    

@@ -36,3 +36,7 @@ Temporary Items
 
 # End of https://www.toptal.com/developers/gitignore/api/macos
 *.log
+
+data_node1
+data_node2
+data_node3
