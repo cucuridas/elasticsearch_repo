@@ -1,0 +1,34 @@
+version: '3.8'
+services:
+# 'elasticsearch-master' 주석 참고
+  elasticsearch-data1:  
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
+
+    container_name: elasticsearch-data
+    environment:   
+    - "ES_JAVA_OPTS=-Xmx2g -Xms2g"
+    - cluster.name=elastic-stack
+    - node.name=elastic-data
+    - cluster.initial_master_nodes=elastic-master
+    - transport.port=9310
+    # master node에서 발급되는 token 값을 받기위한 env 값(해당 값의 정의는 '.env'파일을 통해 전달 받습니다)
+    - ENROLLMENT_TOKEN=$ENROLLMENT_TOKEN
+    ulimits:
+        memlock:
+          soft: -1
+          hard: -1
+    volumes: 
+      - data_plugin1:/usr/share/elasticsearch/plugins      
+      - type: bind
+        source: ./volume/data
+        target: /usr/share/elasticsearch/data      
+      - type: bind
+        source: ./volume/logs
+        target: /usr/share/elasticsearch/logs    
+    network_mode: "host"
+
+#Host volume의 실제 위치 local 일경우 
+volumes:
+  #data node plugin 대한 정보가 mount       
+  data_plugin1:
+    driver: local
