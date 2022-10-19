@@ -47,3 +47,4 @@ docker exec -it {elasticsearch master node continaer 이름} /usr/share/elastics
     
 ![image](https://user-images.githubusercontent.com/65060314/196607563-ea8f5231-30c4-48de-b08e-30cb91c7ad20.png)
     
+* 토큰정보는 따로 보관하여 추가되는 노드의 변수값으로서 활용됩니다
