@@ -1,5 +1,14 @@
 version: '3.8'
 services:
+  make-directory:
+    container_name: make-datapath-directory
+    image: ubuntu:latest
+    volumes:
+      - type: bind
+        source: ./
+        target: /usr/share/
+
+    command: sh -c "mkdir -p /usr/share/volume /usr/share/volume/data /usr/share/volume/logs"
 # 'elasticsearch-master' 주석 참고
   elasticsearch-data1:  
     image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
