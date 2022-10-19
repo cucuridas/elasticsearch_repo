@@ -36,3 +36,8 @@ Temporary Items
 
 # End of https://www.toptal.com/developers/gitignore/api/macos
 *.log
+
+
+volume
+
+.docker-compose.yml.swp
