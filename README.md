@@ -74,6 +74,6 @@ sudo vi /etc/docker/daemon.json
 
 ```bash
 #service 재시작
-sudo systemctl daemon-realod
+sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
