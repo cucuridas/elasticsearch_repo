@@ -35,13 +35,13 @@ usermod -aG docker $USER
 3)  docker-compose 설치 (v 1.29.2)
 
 ```bash
-sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(name -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 ```
 
 4) docker-compose 권한 적용
 
 ```bash
-sudo chmod +x /usr/local/in/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
 ```
 
 5) 정상 설치 확인 (cli 환경 재접속 후 진행)
